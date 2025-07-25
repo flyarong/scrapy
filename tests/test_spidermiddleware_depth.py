@@ -1,43 +1,65 @@
-from unittest import TestCase
+from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import pytest
+
+from scrapy.http import Request, Response
 from scrapy.spidermiddlewares.depth import DepthMiddleware
-from scrapy.http import Response, Request
 from scrapy.spiders import Spider
-from scrapy.statscollectors import StatsCollector
 from scrapy.utils.test import get_crawler
 
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
-class TestDepthMiddleware(TestCase):
+    from scrapy.crawler import Crawler
+    from scrapy.statscollectors import StatsCollector
 
-    def setUp(self):
-        crawler = get_crawler(Spider)
-        self.spider = crawler._create_spider('scrapytest.org')
 
-        self.stats = StatsCollector(crawler)
-        self.stats.open_spider(self.spider)
+@pytest.fixture
+def crawler() -> Crawler:
+    return get_crawler(Spider, {"DEPTH_LIMIT": 1, "DEPTH_STATS_VERBOSE": True})
 
-        self.mw = DepthMiddleware(1, self.stats, True)
 
-    def test_process_spider_output(self):
-        req = Request('http://scrapytest.org')
-        resp = Response('http://scrapytest.org')
-        resp.request = req
-        result = [Request('http://scrapytest.org')]
+@pytest.fixture
+def spider(crawler: Crawler) -> Spider:
+    crawler.spider = crawler._create_spider("scrapytest.org")
+    return crawler.spider
 
-        out = list(self.mw.process_spider_output(resp, result, self.spider))
-        self.assertEqual(out, result)
 
-        rdc = self.stats.get_value('request_depth_count/1', spider=self.spider)
-        self.assertEqual(rdc, 1)
+@pytest.fixture
+def stats(crawler: Crawler, spider: Spider) -> Generator[StatsCollector]:
+    assert crawler.stats is not None
+    crawler.stats.open_spider(spider)
 
-        req.meta['depth'] = 1
+    yield crawler.stats
 
-        out2 = list(self.mw.process_spider_output(resp, result, self.spider))
-        self.assertEqual(out2, [])
+    crawler.stats.close_spider(spider, "")
 
-        rdm = self.stats.get_value('request_depth_max', spider=self.spider)
-        self.assertEqual(rdm, 1)
 
-    def tearDown(self):
-        self.stats.close_spider(self.spider, '')
+@pytest.fixture
+def mw(crawler: Crawler) -> DepthMiddleware:
+    return DepthMiddleware.from_crawler(crawler)
 
+
+def test_process_spider_output(
+    mw: DepthMiddleware, stats: StatsCollector, spider: Spider
+) -> None:
+    req = Request("http://scrapytest.org")
+    resp = Response("http://scrapytest.org")
+    resp.request = req
+    result = [Request("http://scrapytest.org")]
+
+    out = list(mw.process_spider_output(resp, result, spider))
+    assert out == result
+
+    rdc = stats.get_value("request_depth_count/1", spider=spider)
+    assert rdc == 1
+
+    req.meta["depth"] = 1
+
+    out2 = list(mw.process_spider_output(resp, result, spider))
+    assert not out2
+
+    rdm = stats.get_value("request_depth_max", spider=spider)
+    assert rdm == 1

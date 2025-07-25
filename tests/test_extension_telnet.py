@@ -1,26 +1,19 @@
-try:
-    import unittest.mock as mock
-except ImportError:
-    import mock
-
-from twisted.trial import unittest
+import pytest
 from twisted.conch.telnet import ITelnetProtocol
 from twisted.cred import credentials
-from twisted.internet import defer
+from twisted.internet.defer import inlineCallbacks
 
-from scrapy.extensions.telnet import TelnetConsole, logger
+from scrapy.extensions.telnet import TelnetConsole
 from scrapy.utils.test import get_crawler
 
 
-class TelnetExtensionTest(unittest.TestCase):
+class TestTelnetExtension:
     def _get_console_and_portal(self, settings=None):
         crawler = get_crawler(settings_dict=settings)
         console = TelnetConsole(crawler)
-        username = console.username
-        password = console.password
 
         # This function has some side effects we don't need for this test
-        console._get_telnet_vars = lambda: {}
+        console._get_telnet_vars = dict
 
         console.start_listening()
         protocol = console.protocol()
@@ -28,33 +21,33 @@ class TelnetExtensionTest(unittest.TestCase):
 
         return console, portal
 
-    @defer.inlineCallbacks
+    @inlineCallbacks
     def test_bad_credentials(self):
         console, portal = self._get_console_and_portal()
-        creds = credentials.UsernamePassword(b'username', b'password')
+        creds = credentials.UsernamePassword(b"username", b"password")
         d = portal.login(creds, None, ITelnetProtocol)
-        yield self.assertFailure(d, ValueError)
+        with pytest.raises(ValueError, match="Invalid credentials"):
+            yield d
         console.stop_listening()
 
-    @defer.inlineCallbacks
+    @inlineCallbacks
     def test_good_credentials(self):
         console, portal = self._get_console_and_portal()
         creds = credentials.UsernamePassword(
-            console.username.encode('utf8'),
-            console.password.encode('utf8')
+            console.username.encode("utf8"), console.password.encode("utf8")
         )
         d = portal.login(creds, None, ITelnetProtocol)
         yield d
         console.stop_listening()
 
-    @defer.inlineCallbacks
+    @inlineCallbacks
     def test_custom_credentials(self):
         settings = {
-            'TELNETCONSOLE_USERNAME': 'user',
-            'TELNETCONSOLE_PASSWORD': 'pass',
+            "TELNETCONSOLE_USERNAME": "user",
+            "TELNETCONSOLE_PASSWORD": "pass",
         }
         console, portal = self._get_console_and_portal(settings=settings)
-        creds = credentials.UsernamePassword(b'user', b'pass')
+        creds = credentials.UsernamePassword(b"user", b"pass")
         d = portal.login(creds, None, ITelnetProtocol)
         yield d
         console.stop_listening()
